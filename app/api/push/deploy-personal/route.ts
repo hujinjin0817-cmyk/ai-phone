@@ -8,6 +8,7 @@ const GENERATE_SLUG = "push-generate";
 const RESULT_SLUG = "push-shortcut-result";
 const BRIDGE_SLUG = "push-bridge";
 const SCREEN_SLUG = "screen-chat";
+const CHATGPT_PLAN_SLUG = "chatgpt-plan";
 
 type DeployRequest = {
   projectRef?: string;
@@ -17,6 +18,7 @@ type DeployRequest = {
   resultCode?: string;
   bridgeCode?: string;
   screenChatCode?: string;
+  chatgptPlanCode?: string;
   schemaSql?: string;
 };
 
@@ -114,6 +116,7 @@ export async function POST(request: Request) {
   const resultCode = typeof payload.resultCode === "string" ? payload.resultCode : "";
   const bridgeCode = typeof payload.bridgeCode === "string" ? payload.bridgeCode : "";
   const screenChatCode = typeof payload.screenChatCode === "string" ? payload.screenChatCode : "";
+  const chatgptPlanCode = typeof payload.chatgptPlanCode === "string" ? payload.chatgptPlanCode : "";
   const schemaSql = typeof payload.schemaSql === "string" ? payload.schemaSql : "";
 
   if (!/^[a-z0-9]{15,40}$/.test(projectRef)) {
@@ -154,6 +157,13 @@ export async function POST(request: Request) {
     || screenChatCode.length > 600_000
   ) {
     return NextResponse.json({ ok: false, error: "屏幕速聊入口部署包无效。" }, { status: 400 });
+  }
+  if (
+    !chatgptPlanCode.includes("AI Phone · ChatGPT account gateway")
+    || !chatgptPlanCode.includes("Deno.serve")
+    || chatgptPlanCode.length > 300_000
+  ) {
+    return NextResponse.json({ ok: false, error: "ChatGPT 账号网关部署包无效。" }, { status: 400 });
   }
   if (
     !schemaSql.startsWith("-- ai-phone-personal-push-schema-v1")
@@ -212,6 +222,14 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { ok: false, step: "部署屏幕速聊入口失败", error: await upstreamMessage(screenChat) },
         { status: screenChat.status },
+      );
+    }
+
+    const chatgptPlan = await deployFunction({ projectRef, token, slug: CHATGPT_PLAN_SLUG, code: chatgptPlanCode });
+    if (!chatgptPlan.ok) {
+      return NextResponse.json(
+        { ok: false, step: "部署 ChatGPT 账号网关失败", error: await upstreamMessage(chatgptPlan) },
+        { status: chatgptPlan.status },
       );
     }
 

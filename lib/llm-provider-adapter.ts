@@ -9,6 +9,7 @@ import {
     stripHallucinatedTimestamps,
 } from "./api-helpers";
 import { resolveEnabledGenerationParameters } from "./generation-parameters";
+import { getChatGPTPlanTarget, isChatGPTAccountConfig } from "./chatgpt-plan";
 
 export type LlmProviderKind = "openai-compatible" | "anthropic" | "gemini";
 export type NativeToolProtocol = "openai-compatible" | "anthropic" | "gemini";
@@ -84,6 +85,7 @@ export type LlmDebugMessage = {
 
 export function nativeToolProtocolForConfig(config: ApiConfig): NativeToolProtocol | null {
     if (config.enableNativeTools === false) return null;
+    if (isChatGPTAccountConfig(config)) return null;
     if (isNativeAnthropicApi(config)) return "anthropic";
     if (isNativeGoogleApi(config)) return "gemini";
     return "openai-compatible";
@@ -242,6 +244,28 @@ export function buildProviderRequest(
     messages: LlmRequestMessage[],
     options: ProviderRequestOptions = {},
 ): LlmRequestPayload {
+    if (isChatGPTAccountConfig(config)) {
+        if (!config.defaultModel) throw new Error("ChatGPT 账号渠道尚未选择模型。");
+        if (options.tools && options.tools.length > 0) {
+            throw new Error("ChatGPT 订阅额度预览流程暂不支持小手机原生工具调用。");
+        }
+        const target = getChatGPTPlanTarget("responses");
+        const guardedMessages = config.enableImageRecognition === true ? messages : stripVisionParts(messages);
+        const providerMessages = ensureProviderHasUserMessage(normalizeNativeToolMessageAdjacency(guardedMessages));
+        const sampling = buildSamplingBody(preset);
+        return {
+            url: target.url,
+            headers: target.headers,
+            body: {
+                model: config.defaultModel,
+                messages: providerMessages.map(messageForLog),
+                ...(typeof options.maxTokens === "number" ? { max_tokens: options.maxTokens } : sampling.max_tokens ? { max_tokens: sampling.max_tokens } : {}),
+                stream: options.stream === true,
+            },
+            providerKind: "openai-compatible",
+            messagesForLog: providerMessages.map(messageForLog),
+        };
+    }
     const baseUrl = determineBaseUrl(config);
     if (!baseUrl) throw new Error(`API 地址无效：provider=${config.provider}`);
     if (!config.apiKey) throw new Error(`API Key 为空：provider=${config.provider}`);

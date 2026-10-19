@@ -4,6 +4,7 @@
 
 import type { ApiConfig } from "./settings-types";
 import { pushApiLog } from "./api-log-store";
+import { getChatGPTPlanTarget, isChatGPTAccountConfig } from "./chatgpt-plan";
 
 const SIMPLE_ANTHROPIC_AUTO_MAX_TOKENS = 8192;
 
@@ -25,6 +26,7 @@ export function determineBaseUrl(config: { provider: string; baseUrl?: string })
         case "Zhipu":       return "https://open.bigmodel.cn/api/paas/v4";
         case "SiliconFlow": return "https://api.siliconflow.cn/v1";
         case "TogetherAI":  return "https://api.together.xyz/v1";
+        case "ChatGPTAccount": return "chatgpt-plan://personal-supabase";
         case "Custom":      return ""; // must be set via baseUrl
         default:            return "";
     }
@@ -110,6 +112,21 @@ export function buildSimpleLLMRequest(
     options?: SimpleLLMCallOptions,
     stream = false,
 ): SimpleLLMRequest | null {
+    if (isChatGPTAccountConfig(config)) {
+        if (!config.defaultModel) return null;
+        const target = getChatGPTPlanTarget("responses");
+        return {
+            url: target.url,
+            headers: target.headers,
+            body: JSON.stringify({
+                model: config.defaultModel,
+                messages,
+                ...(options?.max_tokens ? { max_tokens: options.max_tokens } : {}),
+                stream,
+            }),
+            providerKind: "openai-compatible",
+        };
+    }
     const baseUrl = determineBaseUrl(config);
     if (!baseUrl || !config.apiKey) return null;
 

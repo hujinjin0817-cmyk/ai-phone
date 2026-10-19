@@ -126,6 +126,11 @@ SUPABASE_ANON_KEY=your-anon-key
 个人云由用户在界面中创建，默认不会复用或修改站点运营库。自部署者只想个人使用时，
 保持 `NEXT_PUBLIC_SELF_HOSTED_MODE=true`，无需先配置站点运营库，也能使用个人云。
 
+个人云还可承载 **ChatGPT 账号（订阅额度）** 渠道：在电脑本地完成一次 OpenAI 官方
+OAuth 登录，凭证直接写入个人 Supabase Vault，由 Edge Function 刷新 Token 并调用
+Responses API，网页和仓库均不接触凭证。首次启用及安全说明见
+[`docs/chatgpt-account.md`](docs/chatgpt-account.md)。
+
 部署完成后，在聊天信息页开启「离线推送与定时消息」；微信 Bot 则在
 **设置 → 微信接入**中添加。云端与本地使用相同的角色运行包，微信消息、离线回复、
 快捷动作结果和来电留痕会按因果顺序合并回小手机。

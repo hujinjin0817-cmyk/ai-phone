@@ -11,7 +11,7 @@ const pairs = [
   ["supabase/functions/push-shortcut-result/index.ts", "public/ai-phone-push/push-shortcut-result.mjs"],
   ["supabase/functions/push-bridge/index.ts", "public/ai-phone-push/push-bridge.mjs"],
   ["supabase/functions/screen-chat/index.ts", "public/ai-phone-push/screen-chat.mjs"],
-  ["docs/personal-push-supabase.sql", "public/ai-phone-push/schema.sql"],
+  ["supabase/functions/chatgpt-plan/index.ts", "public/ai-phone-push/chatgpt-plan.mjs"],
 ];
 
 const failures = [];
@@ -19,6 +19,16 @@ for (const [source, output] of pairs) {
   const sourceText = readFileSync(resolve(root, source), "utf8");
   const outputText = readFileSync(resolve(root, output), "utf8");
   if (sourceText !== outputText) failures.push(`${output} 与 ${source} 不一致`);
+}
+
+const expectedSchema = [
+  readFileSync(resolve(root, "docs/personal-push-supabase.sql"), "utf8"),
+  readFileSync(resolve(root, "docs/chatgpt-plan-supabase.sql"), "utf8"),
+].join("\n\n");
+const generatedSchema = readFileSync(resolve(root, "public/ai-phone-push/schema.sql"), "utf8");
+if (expectedSchema !== generatedSchema) {
+  console.error("[personal-push-dist] public/ai-phone-push/schema.sql 已过期，请运行 npm run push:build-dist");
+  process.exitCode = 1;
 }
 
 const forbiddenOrigin = "floatbubble.netlify.app";

@@ -10,6 +10,7 @@ import { ConfirmDialog } from "@/components/ui/modal";
 import { Toggle, Input } from "@/components/ui/form";
 import { Alert } from "@/components/ui/feedback";
 import { determineBaseUrl, simpleLLMCall } from "@/lib/api-helpers";
+import { getChatGPTPlanTarget, isChatGPTAccountConfig } from "@/lib/chatgpt-plan";
 
 const DEFAULT_CONFIGS: ApiConfig[] = [
     {
@@ -115,6 +116,16 @@ export function ApiSettings() {
         setTestResult(prev => ({ ...prev, [config.id]: { success: false, message: "" } }));
 
         try {
+            if (isChatGPTAccountConfig(config)) {
+                const target = getChatGPTPlanTarget("models");
+                const response = await fetch(target.url, { method: "GET", headers: target.headers, cache: "no-store" });
+                const data = await response.json().catch(() => ({})) as { models?: Array<{ slug?: string; display_name?: string }>; error?: string };
+                if (!response.ok) throw new Error(data.error || `HTTP error! status: ${response.status}`);
+                const modelNames = (data.models || []).map(model => String(model.slug || "")).filter(Boolean);
+                setFetchedModels(prev => ({ ...prev, [config.id]: modelNames }));
+                setTestResult(prev => ({ ...prev, [config.id]: { success: true, message: `成功获取 ${modelNames.length} 个订阅模型` } }));
+                return;
+            }
             const baseUrl = determineBaseUrl(config);
             if (!baseUrl) throw new Error("缺少 Base URL");
             if (!config.apiKey) throw new Error("缺少 API Key");
@@ -309,7 +320,19 @@ export function ApiSettings() {
                                             <label className="menu-desc ml-1">服务商 (Provider)</label>
                                             <select
                                                 value={config.provider}
-                                                onChange={(e) => updateConfig(config.id, { provider: e.target.value })}
+                                                onChange={(e) => {
+                                                    const provider = e.target.value;
+                                                    updateConfig(config.id, provider === "ChatGPTAccount"
+                                                        ? {
+                                                            provider,
+                                                            apiKey: "",
+                                                            baseUrl: "",
+                                                            defaultModel: "",
+                                                            enableNativeTools: false,
+                                                            enableImageRecognition: false,
+                                                        }
+                                                        : { provider });
+                                                }}
                                                 className="ui-select"
                                             >
                                                 <option value="OpenAI">OpenAI</option>
@@ -322,12 +345,12 @@ export function ApiSettings() {
                                                 <option value="Zhipu">Zhipu (GLM)</option>
                                                 <option value="SiliconFlow">SiliconFlow</option>
                                                 <option value="TogetherAI">Together AI</option>
+                                                <option value="ChatGPTAccount">ChatGPT 账号（订阅额度）</option>
                                                 <option value="Custom">自定义 (Custom)</option>
                                             </select>
                                         </div>
 
-                                        {/* Custom 必填 Base URL；其他 provider 可选填中转站地址 */}
-                                        <div className="flex flex-col gap-1">
+                                        {!isChatGPTAccountConfig(config) && <div className="flex flex-col gap-1">
                                             <label className="menu-desc ml-1">
                                                 Base URL {config.provider === "Custom" ? "（必填）" : "（可选，留空用官方端点）"}
                                                 {config.provider === "Google" && (
@@ -348,9 +371,9 @@ export function ApiSettings() {
                                                             : "默认用官方端点，留空即可"
                                                 }
                                             />
-                                        </div>
+                                        </div>}
 
-                                        <div className="flex flex-col gap-1">
+                                        {!isChatGPTAccountConfig(config) && <div className="flex flex-col gap-1">
                                             <label className="menu-desc ml-1">API Key</label>
                                             <Input
                                                 type="password"
@@ -358,7 +381,14 @@ export function ApiSettings() {
                                                 onChange={(e) => updateConfig(config.id, { apiKey: e.target.value })}
                                                 placeholder="sk-..."
                                             />
-                                        </div>
+                                        </div>}
+
+                                        {isChatGPTAccountConfig(config) && (
+                                            <Alert variant="info">
+                                                <AlertCircle size={16} className="mt-[2px] shrink-0" />
+                                                <span className="leading-[1.5]">凭证只保存在你的 Supabase Vault。先运行仓库里的本地登录脚本完成 ChatGPT OAuth，再拉取模型列表；本页不会接收或保存 Token。</span>
+                                            </Alert>
+                                        )}
 
                                         <div className="flex flex-col gap-1">
                                             <label className="menu-desc ml-1">默认模型 (Default Model)</label>
@@ -413,7 +443,7 @@ export function ApiSettings() {
                                             </Alert>
                                         )}
 
-                                        <div
+                                        {!isChatGPTAccountConfig(config) && <div
                                             className="ui-toggle-row mt-2 overflow-visible"
                                             style={{ display: "block", position: "relative", height: "auto", flexShrink: 0, padding: "14px 76px 14px 16px" }}
                                         >
@@ -427,12 +457,12 @@ export function ApiSettings() {
                                                     onChange={(v) => updateConfig(config.id, { enableNativeTools: v })}
                                                 />
                                             </span>
-                                        </div>
+                                        </div>}
 
-                                        <div className="ui-toggle-row mt-2">
+                                        {!isChatGPTAccountConfig(config) && <div className="ui-toggle-row mt-2">
                                             <span className="menu-label font-medium">启用图像识别</span>
                                             <Toggle checked={config.enableImageRecognition} onChange={(v) => updateConfig(config.id, { enableImageRecognition: v })} />
-                                        </div>
+                                        </div>}
 
                                         <div className="ui-toggle-row mt-2">
                                             <span className="flex min-w-0 flex-col">
