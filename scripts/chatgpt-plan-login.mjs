@@ -25,16 +25,25 @@ const b64url = bytes => Buffer.from(bytes).toString("base64url");
 const randomUrlSafe = size => b64url(randomBytes(size));
 const sha256 = value => createHash("sha256").update(value).digest();
 
-function stableHostId() {
-  const file = join(homedir(), ".ai-phone", "chatgpt-host.json");
+function hostRegistrationFile() {
+  return join(homedir(), ".ai-phone", "chatgpt-host.json");
+}
+
+function loadHostRegistration() {
+  const file = hostRegistrationFile();
   try {
     const saved = JSON.parse(readFileSync(file, "utf8"));
-    if (typeof saved.ext_agent_host_id === "string" && saved.ext_agent_host_id.startsWith("urn:uuid:")) return saved.ext_agent_host_id;
+    if (typeof saved.ext_agent_host_id === "string" && saved.ext_agent_host_id.startsWith("urn:uuid:")) return saved;
   } catch { /* first run */ }
-  const value = `urn:uuid:${webcrypto.randomUUID()}`;
+  const saved = { ext_agent_host_id: `urn:uuid:${webcrypto.randomUUID()}` };
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  writeFileSync(file, `${JSON.stringify({ ext_agent_host_id: value })}\n`, { mode: 0o600 });
-  return value;
+  writeFileSync(file, `${JSON.stringify(saved)}\n`, { mode: 0o600 });
+  return saved;
+}
+
+function persistIssuedClientId(registration, clientId) {
+  const saved = { ...registration, client_id: clientId };
+  writeFileSync(hostRegistrationFile(), `${JSON.stringify(saved)}\n`, { mode: 0o600 });
 }
 
 function openBrowser(url) {
@@ -103,7 +112,7 @@ async function validateIdToken(idToken, clientId, nonce) {
   return payload;
 }
 
-function waitForCallback(server, expectedState) {
+function waitForCallback(server, expectedState, requestedClientId) {
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       server.close();
@@ -118,8 +127,11 @@ function waitForCallback(server, expectedState) {
       const error = url.searchParams.get("error");
       const code = url.searchParams.get("code");
       const state = url.searchParams.get("state");
-      const clientId = url.searchParams.get("client_id") || INITIAL_CLIENT_ID;
-      if (error || !code || state !== expectedState || !clientId.startsWith("oaiapp_")) {
+      const returnedClientId = url.searchParams.get("client_id");
+      const clientId = returnedClientId || requestedClientId;
+      const mismatchedReturningClient = requestedClientId !== INITIAL_CLIENT_ID
+        && returnedClientId && returnedClientId !== requestedClientId;
+      if (error || !code || state !== expectedState || !clientId.startsWith("oaiapp_") || mismatchedReturningClient) {
         response.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" }).end("登录失败，可以关闭此页面。 ");
         clearTimeout(timeout);
         server.close();
@@ -159,17 +171,26 @@ async function provisionSupabase(supabaseUrl, accessToken) {
 async function main() {
   const supabaseUrl = (process.env.AI_PHONE_SUPABASE_URL || await prompt("Supabase Project URL: ")).replace(/\/$/, "");
   const serviceKey = process.env.AI_PHONE_SUPABASE_SERVICE_ROLE_KEY || await prompt("Supabase service_role key（输入不显示）: ", { hidden: true });
-  const accessToken = process.env.AI_PHONE_SUPABASE_ACCESS_TOKEN || await prompt("Supabase Access Token（输入不显示，仅用于升级现有项目）: ", { hidden: true });
+  const skipProvision = process.env.AI_PHONE_SKIP_SUPABASE_PROVISION === "1";
+  const accessToken = skipProvision ? "" : (process.env.AI_PHONE_SUPABASE_ACCESS_TOKEN || await prompt("Supabase Access Token（输入不显示，仅用于升级现有项目）: ", { hidden: true }));
   if (!/^https:\/\/.+\.supabase\.co$/i.test(supabaseUrl) || !serviceKey) throw new Error("Supabase URL or service_role key is missing");
-  if (!accessToken) throw new Error("Supabase Access Token is missing");
-  console.log("正在升级现有 Supabase 项目的 Vault 与 chatgpt-plan 云函数……");
-  await provisionSupabase(supabaseUrl, accessToken);
-  console.log("Supabase 升级完成。Access Token 未保存。");
+  if (!skipProvision) {
+    if (!accessToken) throw new Error("Supabase Access Token is missing");
+    console.log("正在升级现有 Supabase 项目的 Vault 与 chatgpt-plan 云函数……");
+    await provisionSupabase(supabaseUrl, accessToken);
+    console.log("Supabase 升级完成。Access Token 未保存。");
+  } else {
+    console.log("Supabase 项目已升级，跳过重复部署，仅执行 ChatGPT OAuth 与 Vault 写入。");
+  }
 
   const verifier = randomUrlSafe(64);
   const state = randomUrlSafe(32);
   const nonce = randomUrlSafe(32);
-  const extAgentHostId = stableHostId();
+  const registration = loadHostRegistration();
+  const extAgentHostId = registration.ext_agent_host_id;
+  const requestedClientId = typeof registration.client_id === "string" && registration.client_id.startsWith("oaiapp_")
+    ? registration.client_id
+    : INITIAL_CLIENT_ID;
   const server = createServer();
   await new Promise((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
   const address = server.address();
@@ -178,7 +199,7 @@ async function main() {
   const auth = new URL(AUTH_URL);
   auth.search = new URLSearchParams({
     response_type: "code",
-    client_id: INITIAL_CLIENT_ID,
+    client_id: requestedClientId,
     redirect_uri: redirectUri,
     scope: SCOPE,
     resource: RESOURCE,
@@ -186,12 +207,13 @@ async function main() {
     code_challenge_method: "S256",
     state,
     nonce,
-    agent_name_hint: "AI Phone",
     ext_agent_host_id: extAgentHostId,
   }).toString();
+  if (requestedClientId === INITIAL_CLIENT_ID) auth.searchParams.set("agent_name_hint", "AI Phone");
   console.log("即将打开 ChatGPT 官方登录页；登录完成前请保持本窗口开启。");
   openBrowser(auth.toString());
-  const callback = await waitForCallback(server, state);
+  const callback = await waitForCallback(server, state, requestedClientId);
+  persistIssuedClientId(registration, callback.clientId);
   const tokenResponse = await fetch(TOKEN_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -204,7 +226,11 @@ async function main() {
       resource: RESOURCE,
     }),
   });
-  if (!tokenResponse.ok) throw new Error(`Token exchange failed (${tokenResponse.status})`);
+  if (!tokenResponse.ok) {
+    const detail = (await tokenResponse.text()).replace(/\s+/g, " ").slice(0, 600);
+    const requestId = tokenResponse.headers.get("x-request-id") || tokenResponse.headers.get("request-id") || "";
+    throw new Error(`Token exchange failed (${tokenResponse.status})${requestId ? ` request_id=${requestId}` : ""}${detail ? `: ${detail}` : ""}`);
+  }
   const token = await tokenResponse.json();
   if (typeof token.access_token !== "string" || typeof token.refresh_token !== "string" || typeof token.id_token !== "string") {
     throw new Error("Token response is incomplete");

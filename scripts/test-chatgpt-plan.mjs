@@ -29,6 +29,10 @@ const responseEvents = [
 
 async function mockFetch(url, init = {}) {
   const target = String(url);
+  if (target.endsWith("/auth/v1/admin/users?page=1&per_page=1")) {
+    const candidate = init.headers?.apikey;
+    return candidate === "sb_secret_test" ? Response.json({ users: [] }) : Response.json({ message: "Unauthorized" }, { status: 401 });
+  }
   if (target.endsWith("/rest/v1/rpc/ai_phone_get_chatgpt_credential")) return Response.json(credential);
   if (target.endsWith("/rest/v1/rpc/ai_phone_set_chatgpt_credential")) {
     const body = JSON.parse(String(init.body));
@@ -91,6 +95,11 @@ const headers = { "x-ai-phone-service-key": "service-test", "Content-Type": "app
 const modelResponse = await handler(new Request("https://example.supabase.co/functions/v1/chatgpt-plan/models", { headers }));
 assert.equal(modelResponse.status, 200);
 assert.equal((await modelResponse.json()).models[0].slug, "gpt-test");
+
+const secretKeyResponse = await handler(new Request("https://example.supabase.co/functions/v1/chatgpt-plan/models", {
+  headers: { "x-ai-phone-service-key": "sb_secret_test" },
+}));
+assert.equal(secretKeyResponse.status, 200);
 
 const requestBody = { model: "gpt-test", messages: [{ role: "system", content: "你是测试助手" }, { role: "user", content: "问候" }] };
 const streamResponse = await handler(new Request("https://example.supabase.co/functions/v1/chatgpt-plan/responses", {

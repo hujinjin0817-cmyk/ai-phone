@@ -30,3 +30,5 @@ tools/weixin-local-assistant/config.txt
 *.ts.net.key
 /public/models/world-builder/
 
+# Local Netlify folder
+.netlify

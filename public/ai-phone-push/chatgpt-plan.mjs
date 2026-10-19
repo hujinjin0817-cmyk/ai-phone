@@ -15,6 +15,8 @@ type Credential = {
 const OPENAI_API = "https://api.openai.com/v1";
 const OPENAI_TOKEN_URL = "https://auth.openai.com/api/accounts/oauth/token";
 const REFRESH_EARLY_SECONDS = 5 * 60;
+const VERIFIED_KEY_TTL_MS = 5 * 60 * 1000;
+const verifiedKeyFingerprints = new Map<string, number>();
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type, x-ai-phone-service-key",
@@ -35,6 +37,32 @@ function safeEqual(left: string, right: string): boolean {
   const length = Math.max(a.length, b.length);
   for (let index = 0; index < length; index += 1) difference |= (a[index % Math.max(a.length, 1)] || 0) ^ (b[index % Math.max(b.length, 1)] || 0);
   return difference === 0;
+}
+
+async function keyFingerprint(value: string): Promise<string> {
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Supabase secret keys (sb_secret_...) replace legacy service_role JWTs but do
+ * not equal the Edge runtime's SUPABASE_SERVICE_ROLE_KEY string. Validate a
+ * supplied backend key against this project's Admin API instead of rejecting
+ * valid new-format keys. Only the irreversible fingerprint is cached.
+ */
+async function hasProjectAdminAccess(projectUrl: string, candidate: string): Promise<boolean> {
+  if (!candidate) return false;
+  const fingerprint = await keyFingerprint(candidate);
+  const cachedUntil = verifiedKeyFingerprints.get(fingerprint) || 0;
+  if (cachedUntil > Date.now()) return true;
+
+  const response = await fetch(`${projectUrl}/auth/v1/admin/users?page=1&per_page=1`, {
+    headers: { apikey: candidate, Authorization: `Bearer ${candidate}` },
+  }).catch(() => null);
+  const allowed = response?.ok === true;
+  await response?.body?.cancel().catch(() => undefined);
+  if (allowed) verifiedKeyFingerprints.set(fingerprint, Date.now() + VERIFIED_KEY_TTL_MS);
+  return allowed;
 }
 
 function serviceHeaders(serviceKey: string): Record<string, string> {
@@ -216,7 +244,9 @@ Deno.serve(async request => {
   const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
   const projectUrl = (Deno.env.get("SUPABASE_URL") || "").replace(/\/$/, "");
   const suppliedKey = request.headers.get("x-ai-phone-service-key") || "";
-  if (!serviceKey || !projectUrl || !suppliedKey || !safeEqual(serviceKey, suppliedKey)) return json({ error: "Unauthorized" }, 401);
+  const authorized = Boolean(serviceKey && projectUrl && suppliedKey)
+    && (safeEqual(serviceKey, suppliedKey) || await hasProjectAdminAccess(projectUrl, suppliedKey));
+  if (!authorized) return json({ error: "Unauthorized" }, 401);
 
   try {
     const url = new URL(request.url);
