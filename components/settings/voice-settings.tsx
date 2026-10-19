@@ -173,9 +173,11 @@ const DEFAULT_OPENAI_VOICES = [
 
 const DEFAULT_ELEVENLABS_VOICES = [
     { id: "JBFqnCBsd6RMkjVDRZzb", name: "George（默认）" },
+    { id: "nf1tdiDQa8KnWtlp1qdM", name: "Yan" },
 ];
 
 const DEFAULT_ELEVENLABS_MODELS = [
+    { id: "eleven_v4", name: "Eleven v4（高质量/高表现力）" },
     { id: "eleven_multilingual_v2", name: "Eleven Multilingual v2" },
     { id: "eleven_flash_v2_5", name: "Eleven Flash v2.5" },
     { id: "eleven_turbo_v2_5", name: "Eleven Turbo v2.5" },
@@ -203,6 +205,13 @@ function voiceOptionsForConfig(config: VoiceApiConfig, fetchedVoices: Record<str
         ...(fetchedVoices[config.id] || []),
         ...(config.customVoices || []),
         ...defaultVoiceOptions(config.provider),
+    ]);
+}
+
+function elevenLabsModelOptions(configId: string, fetchedModels: Record<string, VoiceOption[]>): VoiceOption[] {
+    return uniqueOptions([
+        ...(fetchedModels[configId] || []),
+        ...DEFAULT_ELEVENLABS_MODELS,
     ]);
 }
 
@@ -821,7 +830,7 @@ export function VoiceSettings() {
                                                         </div>
                                                     ) : (
                                                         <select
-                                                            value={(fetchedVoiceModels[config.id] || DEFAULT_ELEVENLABS_MODELS).some(m => m.id === config.model) ? config.model : "__manual__"}
+                                                            value={elevenLabsModelOptions(config.id, fetchedVoiceModels).some(m => m.id === config.model) ? config.model : "__manual__"}
                                                             onChange={(e) => {
                                                                 if (e.target.value === "__manual__") {
                                                                     setManualModelIds(prev => ({ ...prev, [config.id]: true }));
@@ -831,7 +840,7 @@ export function VoiceSettings() {
                                                             }}
                                                             className="ui-select"
                                                         >
-                                                            {(fetchedVoiceModels[config.id] || DEFAULT_ELEVENLABS_MODELS).map(model => (
+                                                            {elevenLabsModelOptions(config.id, fetchedVoiceModels).map(model => (
                                                                 <option key={model.id} value={model.id}>{model.name}</option>
                                                             ))}
                                                             <option value="__manual__">手动输入...</option>
@@ -1132,3 +1141,4 @@ export function VoiceSettings() {
         </div>
     );
 }
+
