@@ -18,11 +18,12 @@
 ## 首次启用
 
 1. 在小手机 **设置 → 数据管理**确认当前个人 Supabase 地址与 `service_role` key 已配置。
-2. 在 **设置 → 云服务部署**对同一个个人云执行一次重新部署。新版部署会增加
-   `chatgpt-plan` Edge Function 和 Vault RPC，不会清空原有配置、备份或聊天数据。
-3. 在本项目目录运行 `npm run chatgpt:login`，按提示输入同一个 Supabase URL 与
-   `service_role` key。密钥输入不会回显；随后浏览器会打开 OpenAI 官方授权页。
-4. 授权成功后，在 **设置 → API 设置**新增配置，服务商选择
+2. 在本项目目录运行 `npm run chatgpt:login`，按提示输入同一个 Supabase URL、
+   `service_role` key 和 Supabase Access Token。两个密钥均不回显、不保存；向导会在
+   同一个项目中增加 `chatgpt-plan` Edge Function 和 Vault RPC，不会清空原有配置、
+   备份或聊天数据，随后打开 OpenAI 官方授权页。也可以先在 **设置 → 云服务部署**
+   对同一个个人云执行一次重新部署，再运行向导（重复执行安全）。
+3. 授权成功后，在 **设置 → API 设置**新增配置，服务商选择
    **ChatGPT 账号（订阅额度）**，点击“拉取模型列表”，选择模型并测试连接。
 
 ## 验证

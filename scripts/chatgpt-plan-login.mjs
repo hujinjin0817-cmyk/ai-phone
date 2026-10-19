@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const AUTH_URL = "https://auth.openai.com/api/accounts/authorize";
 const TOKEN_URL = "https://auth.openai.com/api/accounts/oauth/token";
@@ -18,6 +19,7 @@ const JWKS_URL = "https://auth.openai.com/.well-known/jwks.json";
 const RESOURCE = "https://api.openai.com/v1";
 const INITIAL_CLIENT_ID = "dynamic_agent_client";
 const SCOPE = "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct";
+const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 const b64url = bytes => Buffer.from(bytes).toString("base64url");
 const randomUrlSafe = size => b64url(randomBytes(size));
@@ -132,10 +134,37 @@ function waitForCallback(server, expectedState) {
   });
 }
 
+async function provisionSupabase(supabaseUrl, accessToken) {
+  const projectRef = new URL(supabaseUrl).hostname.split(".")[0];
+  if (!/^[a-z0-9]{15,40}$/.test(projectRef)) throw new Error("Unable to determine Supabase project ref");
+  const code = readFileSync(join(projectRoot, "supabase", "functions", "chatgpt-plan", "index.ts"), "utf8");
+  const sql = readFileSync(join(projectRoot, "docs", "chatgpt-plan-supabase.sql"), "utf8");
+  const form = new FormData();
+  form.append("metadata", JSON.stringify({ name: "chatgpt-plan", entrypoint_path: "index.ts", verify_jwt: false }));
+  form.append("file", new Blob([code], { type: "application/typescript" }), "index.ts");
+  const deployment = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/functions/deploy?slug=chatgpt-plan`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: form,
+  });
+  if (!deployment.ok) throw new Error(`Supabase function deployment failed (${deployment.status})`);
+  const database = await fetch(`https://api.supabase.com/v1/projects/${projectRef}/database/query`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ query: sql, read_only: false }),
+  });
+  if (!database.ok) throw new Error(`Supabase Vault setup failed (${database.status})`);
+}
+
 async function main() {
   const supabaseUrl = (process.env.AI_PHONE_SUPABASE_URL || await prompt("Supabase Project URL: ")).replace(/\/$/, "");
   const serviceKey = process.env.AI_PHONE_SUPABASE_SERVICE_ROLE_KEY || await prompt("Supabase service_role key（输入不显示）: ", { hidden: true });
+  const accessToken = process.env.AI_PHONE_SUPABASE_ACCESS_TOKEN || await prompt("Supabase Access Token（输入不显示，仅用于升级现有项目）: ", { hidden: true });
   if (!/^https:\/\/.+\.supabase\.co$/i.test(supabaseUrl) || !serviceKey) throw new Error("Supabase URL or service_role key is missing");
+  if (!accessToken) throw new Error("Supabase Access Token is missing");
+  console.log("正在升级现有 Supabase 项目的 Vault 与 chatgpt-plan 云函数……");
+  await provisionSupabase(supabaseUrl, accessToken);
+  console.log("Supabase 升级完成。Access Token 未保存。");
 
   const verifier = randomUrlSafe(64);
   const state = randomUrlSafe(32);
