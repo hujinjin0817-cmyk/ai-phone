@@ -25,6 +25,7 @@ export function resolveVoiceConfig(characterId: string, appId?: ContentAppId): V
  * Supported providers:
  * - Minimax: REST API → hex-encoded mp3
  * - OpenAI: REST API → binary audio blob
+ * - ElevenLabs: official REST API via same-origin server route → mp3
  */
 export async function synthesizeSpeech(
     text: string,
@@ -41,6 +42,10 @@ export async function synthesizeSpeech(
 
     if (provider === "OpenAI") {
         return synthesizeOpenAI(text, voiceConfig);
+    }
+
+    if (provider === "ElevenLabs") {
+        return synthesizeElevenLabs(text, voiceConfig);
     }
 
     return null;
@@ -172,6 +177,34 @@ async function synthesizeOpenAI(text: string, config: VoiceApiConfig): Promise<B
 
     const blob = await response.blob();
     return new Blob([await blob.arrayBuffer()], { type: "audio/mpeg" });
+}
+
+// ── ElevenLabs TTS ──────────────────────────────────
+
+async function synthesizeElevenLabs(text: string, config: VoiceApiConfig): Promise<Blob | null> {
+    if (!config.apiKey) throw new Error("ElevenLabs API Key 未配置");
+    if (!config.defaultVoice) throw new Error("ElevenLabs Voice ID 未配置");
+
+    const response = await fetchWithTimeout("/api/voice/elevenlabs-speech", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            apiKey: config.apiKey,
+            text,
+            voiceId: config.defaultVoice,
+            modelId: config.model || "eleven_multilingual_v2",
+        }),
+    });
+
+    if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.message || data.error || `ElevenLabs TTS 请求失败 (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    return new Blob([await blob.arrayBuffer()], {
+        type: response.headers.get("content-type") || "audio/mpeg",
+    });
 }
 
 // ── iOS audio playback that coexists with speech recognition ──────────
