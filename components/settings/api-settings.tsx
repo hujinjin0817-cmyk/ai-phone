@@ -45,6 +45,9 @@ export function ApiSettings() {
     const [fetchedModels, setFetchedModels] = useState<Record<string, string[]>>({});
     const [isTesting, setIsTesting] = useState<Record<string, boolean>>({});
     const [testResult, setTestResult] = useState<Record<string, { success: boolean; message: string }>>({});
+    const [gatewaySecret, setGatewaySecret] = useState("");
+    const [gatewayUnlocking, setGatewayUnlocking] = useState(false);
+    const [gatewayMessage, setGatewayMessage] = useState<{ success: boolean; message: string } | null>(null);
 
     // Load from localStorage on mount
     useEffect(() => {
@@ -220,6 +223,30 @@ export function ApiSettings() {
         }
     };
 
+    const unlockChatGPTGateway = async () => {
+        if (!gatewaySecret) {
+            setGatewayMessage({ success: false, message: "请输入访问口令。" });
+            return;
+        }
+        setGatewayUnlocking(true);
+        setGatewayMessage(null);
+        try {
+            const response = await fetch("/api/chatgpt-plan/auth", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ secret: gatewaySecret }),
+            });
+            const data = await response.json().catch(() => ({})) as { error?: string };
+            if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+            setGatewaySecret("");
+            setGatewayMessage({ success: true, message: "已安全解锁；访问凭证保存在 HttpOnly Cookie 中。" });
+        } catch (error) {
+            setGatewayMessage({ success: false, message: error instanceof Error ? error.message : String(error) });
+        } finally {
+            setGatewayUnlocking(false);
+        }
+    };
+
     if (!isLoaded) return null;
 
     return (
@@ -384,10 +411,38 @@ export function ApiSettings() {
                                         </div>}
 
                                         {isChatGPTAccountConfig(config) && (
-                                            <Alert variant="info">
-                                                <AlertCircle size={16} className="mt-[2px] shrink-0" />
-                                                <span className="leading-[1.5]">凭证只保存在你的 Supabase Vault。先运行仓库里的本地登录脚本完成 ChatGPT OAuth，再拉取模型列表；本页不会接收或保存 Token。</span>
-                                            </Alert>
+                                            <>
+                                                <Alert variant="info">
+                                                    <AlertCircle size={16} className="mt-[2px] shrink-0" />
+                                                    <span className="leading-[1.5]">ChatGPT Token 只保存在 Supabase Vault，Supabase 服务密钥只保存在 Netlify 服务端。本页不会接收或保存这些凭证。</span>
+                                                </Alert>
+                                                <div className="flex flex-col gap-2">
+                                                    <label className="menu-desc ml-1">ChatGPT 账号渠道访问口令</label>
+                                                    <div className="flex gap-2">
+                                                        <Input
+                                                            type="password"
+                                                            value={gatewaySecret}
+                                                            onChange={(event) => setGatewaySecret(event.target.value)}
+                                                            placeholder="仅本次输入，不会保存"
+                                                            autoComplete="off"
+                                                        />
+                                                        <button
+                                                            type="button"
+                                                            onClick={unlockChatGPTGateway}
+                                                            disabled={gatewayUnlocking}
+                                                            className="ui-btn ui-btn-soft-action shrink-0"
+                                                        >
+                                                            {gatewayUnlocking ? "解锁中..." : "安全解锁"}
+                                                        </button>
+                                                    </div>
+                                                    {gatewayMessage && (
+                                                        <Alert variant={gatewayMessage.success ? "success" : "danger"}>
+                                                            <AlertCircle size={16} className="mt-[2px] shrink-0" />
+                                                            <span className="break-all leading-[1.5]">{gatewayMessage.message}</span>
+                                                        </Alert>
+                                                    )}
+                                                </div>
+                                            </>
                                         )}
 
                                         <div className="flex flex-col gap-1">
@@ -501,3 +556,4 @@ export function ApiSettings() {
         </div>
     );
 }
+
